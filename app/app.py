@@ -1,85 +1,212 @@
-import pandas as pd
 import streamlit as st
-from openai import OpenAI
 import os
-import json
+import numpy as np
 from dotenv import load_dotenv
+from openai import OpenAI
+import matplotlib.pyplot as plt
 
+# ------------------------
+# SETUP
+# ------------------------
 load_dotenv()
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-st.title("📊 AI Customer Insights Dashboard")
+st.set_page_config(page_title="AI Business Insights Engine", layout="wide")
 
-# Option selection
-option = st.radio("Choose input method:", ["Paste text", "Upload file"])
+# ------------------------
+# HELPER FUNCTIONS
+# ------------------------
 
-user_input = ""
+def chunk_text(text, chunk_size=150):
+    sentences = text.split(".")
+    chunks = []
+    current = ""
 
-# Paste option
-if option == "Paste text":
-    user_input = st.text_area("Enter customer complaints:")
+    for sentence in sentences:
+        if len(current) + len(sentence) < chunk_size:
+            current += sentence + "."
+        else:
+            chunks.append(current.strip())
+            current = sentence + "."
 
-# Upload option
-elif option == "Upload file":
-    uploaded_file = st.file_uploader("Upload a .txt file", type=["txt"])
-    
-    if uploaded_file is not None:
-        user_input = uploaded_file.read().decode("utf-8")
-        st.text_area("File content:", user_input, height=200)
+    if current:
+        chunks.append(current.strip())
 
-# Analyze button
-if st.button("Analyze") and user_input:
+    return chunks
 
-    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
+def get_embedding(text):
+    response = client.embeddings.create(
+        model="text-embedding-3-small",
+        input=text
+    )
+    return response.data[0].embedding
+
+
+def cosine_similarity(a, b):
+    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+
+
+def retrieve_top_k(query_embedding, doc_embeddings, docs, k=3):
+    similarities = [
+        cosine_similarity(query_embedding, emb)
+        for emb in doc_embeddings
+    ]
+    top_k_idx = np.argsort(similarities)[-k:][::-1]
+    return [docs[i] for i in top_k_idx]
+
+
+def assign_severity(issue):
+    issue = issue.lower()
+    if "crash" in issue or "failure" in issue:
+        return "High"
+    elif "slow" in issue or "delay" in issue:
+        return "Medium"
+    else:
+        return "Low"
+
+
+def plot_issues(issues):
+    counts = [len(issue.split()) for issue in issues]
+
+    plt.figure()
+    plt.barh(issues, counts)
+    plt.xlabel("Impact Score")
+    plt.title("Issue Importance")
+    st.pyplot(plt)
+
+
+def analyze_text(text):
     prompt = f"""
-    You are a business analyst.
+You are a business analyst.
 
-    Analyze the following customer complaints and return output in JSON:
+Return STRICT JSON in this format:
 
-    {{
-      "top_issues": [{{"issue": "", "severity": "High/Medium/Low"}}],
-      "patterns": [],
-      "recommendations": []
-    }}
+{{
+  "top_issues": ["...", "...", "..."],
+  "patterns": ["...", "..."],
+  "recommendations": ["...", "..."]
+}}
 
-    Complaints:
-    {user_input}
-    """
+Data:
+{text}
+"""
 
     response = client.chat.completions.create(
-        model="gpt-4.1-mini",
+        model="gpt-4o-mini",
         messages=[{"role": "user", "content": prompt}]
     )
 
-    output = response.choices[0].message.content
+    return response.choices[0].message.content
 
-    # Clean JSON
-    start = output.find("{")
-    end = output.rfind("}") + 1
-    clean_output = output[start:end]
 
-    data = json.loads(clean_output)
+# ------------------------
+# UI
+# ------------------------
 
-    # Display results
-    st.subheader("🔴 Top Issues")
-    issues = data["top_issues"]
-    # Convert to DataFrame
-    df = pd.DataFrame(issues)
-    # Display list
-    for item in issues:
-        st.write(f"- {item['issue']} ({item['severity']})")
+st.title("📊 AI Business Insights Engine (RAG-Powered)")
+st.markdown("Upload customer complaints and extract actionable insights using AI.")
 
-    st.subheader("🟡 Patterns")
-    for item in data["patterns"]:
-        st.write(f"- {item}")
+tab1, tab2, tab3 = st.tabs(["📂 Upload", "📊 Insights", "🔍 RAG Context"])
 
-    st.subheader("🟢 Recommendations")
-    for item in data["recommendations"]:
-        st.write(f"- {item}")
+# ------------------------
+# TAB 1: Upload
+# ------------------------
 
-    st.subheader("📊 Issue Severity Distribution")
-    # Count severity
-    severity_counts = df["severity"].value_counts()
-    st.bar_chart(severity_counts)
-    st.subheader("📈 Issues Breakdown")
-    st.dataframe(df)
+with tab1:
+    uploaded_file = st.file_uploader("Upload a .txt file", type=["txt"])
+
+    if uploaded_file:
+        text = uploaded_file.read().decode("utf-8")
+        st.session_state["text"] = text
+        st.success("File uploaded successfully!")
+
+        st.subheader("Preview")
+        st.write(text[:500] + "...")
+
+# ------------------------
+# TAB 2: Insights
+# ------------------------
+
+with tab2:
+
+    text = st.session_state.get("text")
+
+    if text:
+
+        st.subheader("🤖 AI Analysis")
+
+        # Step 1: Generate result
+        result = analyze_text(text)
+
+        # Optional debug
+        # st.write(result)
+
+        # Step 2: Parse result
+        from utils import safe_parse_json
+        parsed = safe_parse_json(result)
+
+        # Step 3: Handle parsing failure
+        if not parsed:
+            st.error("⚠️ Could not parse structured output")
+            st.write(result)
+        else:
+            # Step 4: Display metrics
+            col1, col2, col3 = st.columns(3)
+
+            col1.metric("Issues", len(parsed["top_issues"]))
+            col2.metric("Patterns", len(parsed["patterns"]))
+            col3.metric("Recommendations", len(parsed["recommendations"]))
+
+            # Step 5: Display sections
+            st.subheader("🚨 Top Issues")
+            for issue in parsed["top_issues"]:
+                st.error(issue)
+
+            st.subheader("🔁 Patterns")
+            for pattern in parsed["patterns"]:
+                st.warning(pattern)
+
+            st.subheader("💡 Recommendations")
+            for rec in parsed["recommendations"]:
+                st.success(rec)
+
+# ------------------------
+# TAB 3: RAG CONTEXT
+# ------------------------
+
+with tab3:
+    if "text" in st.session_state:
+
+        text = st.session_state["text"]
+
+        st.subheader("🔍 Retrieval Process")
+
+        chunks = chunk_text(text)
+
+        with st.spinner("Generating embeddings..."):
+            doc_embeddings = [get_embedding(chunk) for chunk in chunks]
+
+        query = st.text_input("Ask a question about the data:")
+
+        if query:
+            query_embedding = get_embedding(query)
+            top_chunks = retrieve_top_k(query_embedding, doc_embeddings, chunks)
+
+            st.subheader("📌 Most Relevant Context")
+
+            for chunk in top_chunks:
+                st.info(chunk)
+import json
+
+result = analyze_text(text)
+
+try:
+    parsed = json.loads(result)
+except:
+    st.error("Parsing failed")
+    st.write(result)
+    parsed = None
+from utils import safe_parse_json
+
+parsed = safe_parse_json(result)
