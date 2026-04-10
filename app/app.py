@@ -147,9 +147,11 @@ with tab2:
         parsed = safe_parse_json(result)
 
         # Step 3: Handle parsing failure
-        if not parsed:
+        if parsed is None:
             st.error("⚠️ Could not parse structured output")
             st.write(result)
+        elif not parsed["top_issues"]:
+            st.warning("⚠️ No issues detected in input data")
         else:
             # Step 4: Display metrics
             col1, col2, col3 = st.columns(3)
