@@ -4,6 +4,7 @@ import numpy as np
 from dotenv import load_dotenv
 from openai import OpenAI
 import matplotlib.pyplot as plt
+from rag import retrieve_similar_documents, retrieve_top_5_similar_documents
 
 # ------------------------
 # SETUP
@@ -48,12 +49,15 @@ def cosine_similarity(a, b):
 
 
 def retrieve_top_k(query_embedding, doc_embeddings, docs, k=3):
-    similarities = [
-        cosine_similarity(query_embedding, emb)
-        for emb in doc_embeddings
+    return [
+        result["document"]
+        for result in retrieve_similar_documents(
+            query_embedding,
+            doc_embeddings,
+            docs,
+            k=k,
+        )[:k]
     ]
-    top_k_idx = np.argsort(similarities)[-k:][::-1]
-    return [docs[i] for i in top_k_idx]
 
 
 def assign_severity(issue):
@@ -193,22 +197,17 @@ with tab3:
 
         if query:
             query_embedding = get_embedding(query)
-            top_chunks = retrieve_top_k(query_embedding, doc_embeddings, chunks)
+            try:
+                top_chunks = retrieve_top_5_similar_documents(
+                    query_embedding,
+                    doc_embeddings,
+                    chunks,
+                )
+            except ImportError as error:
+                st.error(str(error))
+                top_chunks = []
 
             st.subheader("📌 Most Relevant Context")
 
-            for chunk in top_chunks:
-                st.info(chunk)
-import json
-
-result = analyze_text(text)
-
-try:
-    parsed = json.loads(result)
-except:
-    st.error("Parsing failed")
-    st.write(result)
-    parsed = None
-from utils import safe_parse_json
-
-parsed = safe_parse_json(result)
+            for result in top_chunks:
+                st.info(f"Score: {result['score']:.4f}\n\n{result['document']}")
