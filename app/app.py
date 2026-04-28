@@ -4,7 +4,13 @@ import numpy as np
 from dotenv import load_dotenv
 from openai import OpenAI
 import matplotlib.pyplot as plt
-from rag import retrieve_similar_documents, retrieve_top_5_similar_documents
+
+try:
+    from app.rag import retrieve_similar_documents, retrieve_top_5_similar_documents
+    from app.utils import safe_parse_json
+except ModuleNotFoundError:
+    from rag import retrieve_similar_documents, retrieve_top_5_similar_documents
+    from utils import safe_parse_json
 
 # ------------------------
 # SETUP
@@ -147,7 +153,6 @@ with tab2:
         # st.write(result)
 
         # Step 2: Parse result
-        from utils import safe_parse_json
         parsed = safe_parse_json(result)
 
         # Step 3: Handle parsing failure
