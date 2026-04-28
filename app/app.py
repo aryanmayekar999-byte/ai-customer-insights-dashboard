@@ -207,6 +207,8 @@ with tab3:
                     query_embedding,
                     doc_embeddings,
                     chunks,
+                    query_text=query,
+                    rerank=True,
                 )
             except ImportError as error:
                 st.error(str(error))
@@ -215,4 +217,5 @@ with tab3:
             st.subheader("📌 Most Relevant Context")
 
             for result in top_chunks:
-                st.info(f"Score: {result['score']:.4f}\n\n{result['document']}")
+                score = result.get("rerank_score", result["score"])
+                st.info(f"Score: {score:.4f}\n\n{result['document']}")
